@@ -5,6 +5,8 @@ import { useContract } from "@starknet-react/core";
 import type { Abi } from "starknet";
 import { COLLECTION_NFT_ABI } from "@/abis/ip_nft";
 import { fetchIPFSMetadata, processIPFSHashToUrl } from "@/utils/ipfs";
+import { LicenseType } from "@/types/asset";
+import { LicenseType } from "@/types/myasset";
 
 export type CollectionAsset = {
   id: string;
@@ -12,6 +14,8 @@ export type CollectionAsset = {
   name: string;
   image?: string;
   tokenUri?: string;
+  creator: string;
+  licenseType: LicenseType;
 };
 
 type Options = {
@@ -21,12 +25,11 @@ type Options = {
 
 export function useCollectionAssets(
   nftAddress?: `0x${string}`,
-  options: Options = {}
+  options: Options = {},
 ) {
   const [assets, setAssets] = useState<CollectionAsset[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  
 
   const { contract } = useContract({
     abi: COLLECTION_NFT_ABI as unknown as Abi,
@@ -45,12 +48,24 @@ export function useCollectionAssets(
       let supply = options.totalSupply ?? 0;
       if (!supply) {
         try {
-          const res: unknown = await (contract as unknown as { get_total_supply?: () => Promise<unknown> }).get_total_supply?.();
-          if (res !== undefined) supply = parseInt((res as { toString?: () => string } | string)?.toString?.() ?? String(res));
+          const res: unknown = await (
+            contract as unknown as { get_total_supply?: () => Promise<unknown> }
+          ).get_total_supply?.();
+          if (res !== undefined)
+            supply = parseInt(
+              (res as { toString?: () => string } | string)?.toString?.() ??
+                String(res),
+            );
         } catch (e) {
           try {
-            const res2: unknown = await (contract as unknown as { total_supply?: () => Promise<unknown> }).total_supply?.();
-            if (res2 !== undefined) supply = parseInt((res2 as { toString?: () => string } | string)?.toString?.() ?? String(res2));
+            const res2: unknown = await (
+              contract as unknown as { total_supply?: () => Promise<unknown> }
+            ).total_supply?.();
+            if (res2 !== undefined)
+              supply = parseInt(
+                (res2 as { toString?: () => string } | string)?.toString?.() ??
+                  String(res2),
+              );
           } catch (e2) {
             supply = 0;
           }
@@ -58,19 +73,18 @@ export function useCollectionAssets(
       }
 
       let maxCount = options.limit ?? (supply || 0);
-      
+
       // If we don't have a total supply, try to discover tokens by checking a reasonable range
       if (!maxCount || maxCount <= 0) {
         maxCount = 10; // Check first 10 token IDs as a fallback
       }
 
       const collected: CollectionAsset[] = [];
-      
+
       // Try to fetch tokens starting from ID 0 up to the total supply
       // This handles cases where tokens might not be minted sequentially
       for (let tokenId = 0; tokenId < maxCount; tokenId++) {
-        
-        try {   
+        try {
           // First check if the token exists by trying to get its owner
           let ownerExists = false;
           try {
@@ -86,14 +100,22 @@ export function useCollectionAssets(
                 try {
                   ownerRaw = await contract.call("get_owner", [tokenId]);
                 } catch (e3) {
-                  console.log(`All owner functions failed for token ${tokenId}:`, { e1, e2, e3 });
+                  console.log(
+                    `All owner functions failed for token ${tokenId}:`,
+                    { e1, e2, e3 },
+                  );
                   continue;
                 }
               }
             }
-            
+
             // If we get an owner (not zero address), the token exists
-            if (ownerRaw && ownerRaw !== "0x0" && ownerRaw !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+            if (
+              ownerRaw &&
+              ownerRaw !== "0x0" &&
+              ownerRaw !==
+                "0x0000000000000000000000000000000000000000000000000000000000000000"
+            ) {
               ownerExists = true;
             }
           } catch (ownerError) {
@@ -132,21 +154,42 @@ export function useCollectionAssets(
 
           let name = `#${tokenId}`;
           let image: string | undefined;
-          
+          let creator = "";
+          let licenseType = "Creative Commons" as LicenseType;
+
           if (tokenUri) {
             const match = tokenUri.match(/\/ipfs\/([a-zA-Z0-9]+)/);
             if (match) {
               try {
                 const meta = await fetchIPFSMetadata(match[1]);
                 name = (meta?.name as string) || name;
-                image = processIPFSHashToUrl((meta?.image as string) || "", "/placeholder.svg");
+                image = processIPFSHashToUrl(
+                  (meta?.image as string) || "",
+                  "/placeholder.svg",
+                );
+                creator =
+                  typeof meta?.creator === "object" && meta?.creator !== null
+                    ? meta.creator.name || "0x0"
+                    : "0x0";
+                licenseType =
+                  (meta?.attributes?.find(
+                    (attr) => attr.trait_type === "License Type",
+                  )?.value as LicenseType) || licenseType;
               } catch (metaError) {
                 // Continue with default values if metadata fetch fails
               }
             }
           }
 
-          collected.push({ id: `${nftAddress}-${tokenId}`, tokenId, name, image, tokenUri });
+          collected.push({
+            id: `${nftAddress}-${tokenId}`,
+            tokenId,
+            name,
+            image,
+            tokenUri,
+            creator,
+            licenseType,
+          });
 
           // opportunistic streaming every 12 items
           if (collected.length % 12 === 0) {
@@ -168,8 +211,6 @@ export function useCollectionAssets(
         for (const a of collected) map.set(a.id, a);
         return Array.from(map.values());
       });
-      
-      
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -184,8 +225,6 @@ export function useCollectionAssets(
 
   return useMemo(
     () => ({ assets, loading, error, reload: load }),
-    [assets, loading, error, load]
+    [assets, loading, error, load],
   );
 }
-
-

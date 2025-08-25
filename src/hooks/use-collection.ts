@@ -10,9 +10,8 @@ import { COLLECTION_CONTRACT_ADDRESS } from "@/services/constants";
 import { fetchOneByOne } from "@/lib/utils";
 
 import { fetchIPFSMetadata, processIPFSHashToUrl } from "@/utils/ipfs";
-// import { Collection, CollectionValidator } from "@/lib/types";
+import { Collection, CollectionValidator } from "@/lib/types";
 import { COLLECTION_NFT_ABI } from "@/abis/ip_nft";
-import { Collection } from "@/types/asset";
 
 export interface ICreateCollection {
   name: string;
@@ -66,13 +65,16 @@ async function processCollectionMetadata(
   let isValidIPFS = false;
 
   if (typeof baseUri === "string") {
+    // Process baseUri
     const processedBaseUri = processIPFSHashToUrl(baseUri, "/placeholder.svg");
+    // Check if the processed URL is valid for IPFS metadata fetching
     if (processedBaseUri && processedBaseUri.includes("/ipfs/")) {
       baseUri = processedBaseUri;
       isValidIPFS = true;
     }
   }
 
+  // Fetch IPFS metadata if available
   let ipfsMetadata = null;
   try {
     if (isValidIPFS && baseUri && baseUri.includes("/ipfs/")) {
@@ -89,30 +91,34 @@ async function processCollectionMetadata(
     ipfsMetadata = null;
   }
 
+  // Clean the name - remove null bytes and trim
   let cleanName = metadata.name;
   if (typeof cleanName === "string") {
     cleanName = cleanName.replace(/\0/g, "").trim();
   }
 
+  // Use total_minted for total supply
   const totalSupply = parseInt(metadata.total_minted) || 0;
-  const itemCount = totalSupply - (parseInt(metadata.total_burned) || 0);
 
-  let coverImage = "/placeholder.svg";
+  // Process image with priority: IPFS metadata > valid IPFS URL > placeholder
+  let image = "/placeholder.svg";
   if (ipfsMetadata?.coverImage) {
-    coverImage = processIPFSHashToUrl(
+    image = processIPFSHashToUrl(
       ipfsMetadata.coverImage as string,
       "/placeholder.svg",
     );
   } else if (ipfsMetadata?.image) {
-    coverImage = processIPFSHashToUrl(
+    image = processIPFSHashToUrl(
       ipfsMetadata.image as string,
       "/placeholder.svg",
     );
   } else if (isValidIPFS && baseUri) {
-    coverImage = baseUri;
+    image = baseUri;
   }
 
+  // Additional check: if the IPFS metadata itself has "undefined/" prefix, handle it
   if (ipfsMetadata && typeof ipfsMetadata === "object") {
+    // Check if any field in the metadata has "undefined/" prefix
     Object.keys(ipfsMetadata).forEach((key) => {
       const value = ipfsMetadata[key];
       if (typeof value === "string" && value.startsWith("undefined/")) {
@@ -124,51 +130,78 @@ async function processCollectionMetadata(
     });
   }
 
-  // Map to the new Collection interface
+  // Create the collection object
   const collection: Collection = {
     id: id,
-    slug: generateSlug(cleanName || "mip-collection"),
     name: cleanName || "MIP Collection",
-    type: (ipfsMetadata?.type as string) || "general",
     description: ipfsMetadata?.description || "Programmable IP Collection",
-    coverImage: coverImage,
-    bannerImage: ipfsMetadata?.bannerImage as string | undefined,
-    creator: {
-      id:
-        metadata.owner && metadata.owner !== "0" && metadata.owner !== "0x0"
-          ? `0x${BigInt(metadata.owner).toString(16)}`
-          : "",
-      username: metadata.owner,
-      name: "",
-      avatar: "",
-      verified: false,
-      wallet:
-        metadata.owner && metadata.owner !== "0" && metadata.owner !== "0x0"
-          ? `0x${BigInt(metadata.owner).toString(16)}`
-          : "",
-    },
-    assets: itemCount,
-    floorPrice: undefined,
-    totalVolume: undefined,
-    createdAt: metadata.last_mint_time || new Date().toISOString(),
-    updatedAt: metadata.last_transfer_time || new Date().toISOString(),
-    category: (ipfsMetadata?.category as string) || "",
-    tags: (ipfsMetadata?.tags as string) || "",
-    isPublic: ipfsMetadata?.visibility === "public",
-    isFeatured: false,
-    blockchain: "MIP",
-    contractAddress: nftAddress,
+    image: image,
+    nftAddress: nftAddress,
+
+    owner:
+      metadata.owner && metadata.owner !== "0" && metadata.owner !== "0x0"
+        ? `0x${BigInt(metadata.owner).toString(16)}`
+        : "",
+
+    isActive: metadata.is_active,
+    totalMinted: parseInt(metadata.total_minted) || 0,
+    totalBurned: parseInt(metadata.total_burned) || 0,
+    totalTransfers: parseInt(metadata.total_transfers) || 0,
+    lastMintTime: metadata.last_mint_time,
+    lastBurnTime: metadata.last_burn_time,
+    lastTransferTime: metadata.last_transfer_time,
+    itemCount:
+      (parseInt(metadata.total_minted) || 0) -
+      (parseInt(metadata.total_burned) || 0),
+    totalSupply: totalSupply,
+    baseUri: baseUri,
+    symbol: metadata.symbol,
+    type:
+      typeof ipfsMetadata?.type === "string" ? ipfsMetadata.type : undefined,
+    visibility:
+      typeof ipfsMetadata?.visibility === "string"
+        ? ipfsMetadata.visibility
+        : undefined,
+    enableVersioning:
+      typeof ipfsMetadata?.enableVersioning === "boolean"
+        ? ipfsMetadata.enableVersioning
+        : undefined,
+    allowComments:
+      typeof ipfsMetadata?.allowComments === "boolean"
+        ? ipfsMetadata.allowComments
+        : undefined,
+    requireApproval:
+      typeof ipfsMetadata?.requireApproval === "boolean"
+        ? ipfsMetadata.requireApproval
+        : undefined,
   };
 
-  return collection;
-}
+  // Validate and normalize the collection
+  const validatedCollection =
+    CollectionValidator.validateAndNormalize(collection);
+  if (!validatedCollection) {
+    // Return a minimal valid collection as fallback
+    return {
+      id: id,
+      name: "Invalid Collection",
+      description: "This collection has invalid data",
+      image: "/placeholder.svg",
+      nftAddress: "",
+      owner: "",
+      isActive: false,
+      totalMinted: 0,
+      totalBurned: 0,
+      totalTransfers: 0,
+      lastMintTime: "",
+      lastBurnTime: "",
+      lastTransferTime: "",
+      itemCount: 0,
+      totalSupply: 0,
+      baseUri: "",
+    };
+  }
 
-// Helper function to generate slug (implement according to your needs)
-function generateSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
+  return validatedCollection;
 }
 
 export function useCollection(): UseCollectionReturn {

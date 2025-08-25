@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,8 +34,12 @@ import {
   getCreatorByName,
 } from "@/lib/mock-data";
 import { useGetCollection, useGetCollectionId } from "@/hooks/use-collection";
-import { Collection } from "@/types/asset";
+import { Collection } from "@/lib/types";
 import { useParams, useRouter } from "next/navigation";
+import React from "react";
+import { useCollectionAssets } from "@/hooks/use-collection-assets";
+import { toHexString } from "@/lib/utils";
+import Image from "next/image";
 
 interface CollectionPageProps {
   params: {
@@ -93,7 +97,7 @@ export default function CollectionPage() {
   const collectionAssets = collection
     ? getAssetsByCollection(collection.name)
     : [];
-  const creator = collection ? getCreatorByName(collection.creator.id) : null;
+  const creator = collection ? getCreatorByName(collection.owner) : null;
 
   if (!collection) {
     return (
@@ -119,6 +123,11 @@ export default function CollectionPage() {
       asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       asset.description.toLowerCase().includes(searchQuery.toLowerCase()),
   );
+
+  const coverImage =
+    collection.image && collection.image !== "/placeholder.svg"
+      ? collection.image
+      : "/placeholder.svg?height=400&width=600";
 
   const handleCopy = async (text: string, type: string) => {
     try {
@@ -158,7 +167,7 @@ export default function CollectionPage() {
           {/* Cover Image */}
           <div className="h-48 md:h-64 relative overflow-hidden rounded-xl mb-6">
             <img
-              src={collection.coverImage || "/placeholder.svg"}
+              src={coverImage || "/placeholder.svg"}
               alt={collection.name}
               className="h-full w-full object-cover"
             />
@@ -180,7 +189,7 @@ export default function CollectionPage() {
                       variant="outline"
                       className="bg-white/20 text-white backdrop-blur-sm border-white/30"
                     >
-                      {collection.totalVolume} assets
+                      {collection.totalSupply} assets
                     </Badge>
                   </div>
                 </div>
@@ -232,7 +241,9 @@ export default function CollectionPage() {
                       <p className="text-sm text-muted-foreground">
                         Total Assets
                       </p>
-                      <p className="text-2xl font-bold">{collection.assets}</p>
+                      <p className="text-2xl font-bold">
+                        {collection.totalSupply}
+                      </p>
                     </div>
                     <Grid3X3 className="h-8 w-8 text-muted-foreground" />
                   </div>
@@ -247,7 +258,7 @@ export default function CollectionPage() {
                         Total Value
                       </p>
                       <p className="text-2xl font-bold">
-                        {collection.assets * +collection.floorPrice!}
+                        {collection.totalSupply * collection.floorPrice!}
                       </p>
                     </div>
                     <BarChart3 className="h-8 w-8 text-muted-foreground" />
@@ -275,7 +286,7 @@ export default function CollectionPage() {
                     <div>
                       <p className="text-sm text-muted-foreground">Owners</p>
                       <p className="text-2xl font-bold">
-                        {Math.ceil(collection.assets * 0.7)}
+                        {Math.ceil(collection.totalMinted * 0.7)}
                       </p>
                     </div>
                     <Users className="h-8 w-8 text-muted-foreground" />
@@ -299,11 +310,14 @@ export default function CollectionPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleCopy(collection.slug, "address")}
+                    onClick={() => handleCopy(collection.nftAddress, "address")}
                     className="h-auto p-1 font-mono text-xs"
                   >
-                    {collection.slug.substring(0, 6)}...
-                    {collection.slug.substring(collection.slug.length - 4)}
+                    {/*Could be the actual `collectionAddress` param used in the URL*/}
+                    {collection.nftAddress.substring(0, 6)}...
+                    {collection.nftAddress.substring(
+                      collection.nftAddress.length - 4,
+                    )}
                     <Copy className="h-3 w-3 ml-1" />
                   </Button>
                 </div>
@@ -324,7 +338,7 @@ export default function CollectionPage() {
 
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Created</span>
-                  <span className="text-sm">{collection.createdAt}</span>
+                  <span className="text-sm">{collection.lastBurnTime}</span>
                 </div>
 
                 <div className="pt-2">
@@ -352,10 +366,10 @@ export default function CollectionPage() {
                       src={
                         creator?.avatar || "/placeholder.svg?height=40&width=40"
                       }
-                      alt={collection.creator.name}
+                      alt={collection.owner}
                     />
                     <AvatarFallback>
-                      {collection.creator.wallet.substring(0, 2).toUpperCase()}
+                      {collection.owner.substring(0, 2).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1">
@@ -363,28 +377,26 @@ export default function CollectionPage() {
                       {creator ? (
                         <Link href={`/creators/${creator.slug}`}>
                           <h3 className="font-semibold hover:text-primary transition-colors cursor-pointer">
-                            {collection.creator.id}
+                            {collection.owner}
                           </h3>
                         </Link>
                       ) : (
-                        <h3 className="font-semibold">
-                          {collection.creator.id}
-                        </h3>
+                        <h3 className="font-semibold">{collection.owner}</h3>
                       )}
-                      {creator?.verified && (
+                      {collection.isActive && (
                         <Badge variant="secondary">
                           <Shield className="h-3 w-3 mr-1" />
                           Verified
                         </Badge>
                       )}
                     </div>
-                    {creator && (
+                    {collection.owner && (
                       <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
-                        {creator.bio}
+                        {collection.description}
                       </p>
                     )}
                     {creator && (
-                      <Link href={`/creators/${creator.slug}`}>
+                      <Link href={`/creators/${collection.owner}`}>
                         <Button variant="outline" size="sm">
                           View Profile
                         </Button>
@@ -398,49 +410,129 @@ export default function CollectionPage() {
         </div>
 
         {/* Assets Section */}
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-            <div>
-              <h3 className="text-2xl font-bold">Assets</h3>
-              <p className="text-muted-foreground">
-                {filteredAssets.length} of {collectionAssets.length} assets
-              </p>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search assets..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 w-64"
-                />
-              </div>
-            </div>
-          </div>
-
-          {filteredAssets.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {filteredAssets.map((asset) => (
-                <NFTCard key={asset.id} asset={asset} />
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <div className="text-muted-foreground mb-4">
-                {searchQuery
-                  ? "No assets found matching your search."
-                  : "No assets in this collection yet."}
-              </div>
-              {searchQuery && (
-                <Button variant="outline" onClick={() => setSearchQuery("")}>
-                  Clear Search
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
+        <CollectionNFTs
+          nftAddress={collectionAddress as string}
+          totalSupply={collection.totalSupply}
+        />
       </main>
     </div>
   );
 }
+
+const CollectionNFTs = React.memo(
+  ({
+    nftAddress,
+    totalSupply,
+  }: {
+    nftAddress: string;
+    totalSupply: number;
+  }) => {
+    const [searchQuery, setSearchQuery] = useState("");
+    const paramsLocal = useParams();
+    const idParam = String(paramsLocal?.id || "");
+
+    // Memoize the hook call parameters
+    const hookParams = useMemo(
+      () => ({
+        totalSupply,
+        limit: Math.min(totalSupply || 10, 10), //limit is ten for now
+      }),
+      [totalSupply],
+    );
+
+    const { assets, loading, error } = useCollectionAssets(
+      toHexString(nftAddress) as `0x${string}`,
+      hookParams,
+    );
+
+    if (loading && assets.length === 0) {
+      return (
+        <div className="space-y-4">
+          <div className="text-center h-12">
+            <p className="text-muted-foreground mb-2">
+              Discovering collection assets...
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="text-center py-12">
+          <p className="text-red-500 mb-2">Error loading collection assets</p>
+          <p className="text-sm text-muted-foreground">{error}</p>
+        </div>
+      );
+    }
+
+    if (assets.length === 0) {
+      return (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">
+            No assets found for this collection.
+          </p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Collection NFT ID: {idParam}
+          </p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Total Supply: {totalSupply || "Unknown"}
+          </p>
+        </div>
+      );
+    }
+
+    const filteredAssets = assets.filter(
+      (asset) =>
+        asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        asset.name.toLowerCase().includes(searchQuery.toLowerCase()),
+    );
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-bold">Assets</h3>
+            <p className="text-muted-foreground">
+              {filteredAssets.length} of {assets.length} assets
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search assets..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 w-64"
+              />
+            </div>
+          </div>
+        </div>
+
+        {filteredAssets.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {filteredAssets.map((asset) => (
+              <NFTCard key={asset.id} asset={asset} />
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <div className="text-muted-foreground mb-4">
+              {searchQuery
+                ? "No assets found matching your search."
+                : "No assets in this collection yet."}
+            </div>
+            {searchQuery && (
+              <Button variant="outline" onClick={() => setSearchQuery("")}>
+                Clear Search
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  },
+);
+
+CollectionNFTs.displayName = "CollectionNFTs";
